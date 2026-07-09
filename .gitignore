@@ -12,3 +12,5 @@ venv/
 
 # OS junk
 .DS_Store
+
+.idea/
