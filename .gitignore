@@ -1,0 +1,14 @@
+# AWS credentials
+*.pem
+new_creds.txt
+credentials.txt
+.aws/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS junk
+.DS_Store
