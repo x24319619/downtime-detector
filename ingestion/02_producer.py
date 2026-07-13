@@ -1,7 +1,7 @@
 """
 Server Pulse - Kinesis Producer (for .log files — Apache Combined Log Format)
 -------------------------------------------------------------------------------
-Reads a raw Apache server log file  — one log line per row, like:
+Reads a raw Apache server log file (NOT a CSV) — one log line per row, like:
 
     127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /page.html HTTP/1.1" 200 2326 "http://ref.com" "Mozilla/5.0"
 
@@ -26,16 +26,16 @@ from datetime import datetime, timezone
 
 import boto3
 
-# Matches this dataset's extended Apache "combined" log format, which adds a
-# trailing response_time (ms) after the user-agent:
-# IP - - [timestamp] "METHOD /path HTTP/version" status bytes "referrer" "user-agent" response_time
+# Matches the zanbil.ir e-commerce access log format (real dataset, 1 GB):
+# IP - - [timestamp] "METHOD /path HTTP/version" status bytes "referrer" "user-agent" "extra_field"
+
 LOG_PATTERN = re.compile(
     r'(?P<client_ip>\S+) \S+ \S+ \[(?P<timestamp>[^\]]+)\] '
     r'"(?P<request_type>\S+) (?P<endpoint>\S+) \S+" '
     r'(?P<status_code>\d{3}) (?P<bytes_sent>\S+)'
     r'(?: "(?P<referrer>[^"]*)")?'
     r'(?: "(?P<user_agent>[^"]*)")?'
-    r'(?: (?P<response_time>\d+))?'
+    r'(?: "(?P<extra_field>[^"]*)")?'
 )
 
 
@@ -68,10 +68,6 @@ def parse_log_line(line):
         record["bytes_sent"] = int(record["bytes_sent"])
     except (TypeError, ValueError):
         record["bytes_sent"] = 0  # Apache logs use "-" for zero bytes
-    try:
-        record["response_time"] = int(record["response_time"])
-    except (TypeError, ValueError):
-        pass
 
     # Stamp with the actual ingestion time — the speed layer windows on THIS,
     # not the log's original (possibly years-old) timestamp. This is what
@@ -105,6 +101,10 @@ def stream_records(filepath, stream_name, region, rate, loop, jitter, max_record
 
                 partition_key = str(record.get("endpoint") or record.get("client_ip") or "default")
 
+                # Kinesis partition keys must be <= 256 chars — this dataset has
+                # some very long URLs (encoded query strings, long slugs) that
+                # exceed this, so truncate defensively.
+                partition_key = partition_key[:256]
                 try:
                     kinesis.put_record(
                         StreamName=stream_name,
